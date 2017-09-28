@@ -24,13 +24,20 @@ module FISC_Core(
 	input [`FISC_INTEGER_SZ-1:0] din_bus_b,            /* Data Input Bus  (channel b) */
 	output reg [`FISC_INTEGER_SZ-1:0] dout_bus_b,      /* Data Output Bus (channel b) */
 	output reg [`FISC_ADDRESS_BOOT_SZ-1:0] addr_bus_b, /* Address Bus     (channel b) */
-	
+
 	/* Debug wires */
 	output dbg_init,
 	output [3:0] dbg1,
 	output [3:0] dbg2,
 	output [3:0] dbg3,
-	output [3:0] dbg4
+	output [3:0] dbg4,
+	/* Debug UART wires */
+	output reg [7:0] dbg_uart_din,
+	input      [7:0] dbg_uart_dout,
+	output reg       dbg_uart_wr_en,
+	input            dbg_uart_tx_busy,
+	input            dbg_uart_rdy,
+	output reg       dbg_uart_rdy_clr
 );
 
 `include "debug.sv"
@@ -148,6 +155,9 @@ module FISC_Core(
 		wr_fromimm = 0;
 		wr_fromreg = 0;
 		
+		/* Debug UART */
+		debug_uart_stop();		
+		
 		fetch_word_tophalf <= 0;
 		ctr <= 0;
 	endtask
@@ -215,9 +225,13 @@ module FISC_Core(
 		if(!initialized)
 			debugInit();
 			
-		if(!wait_n)
+		if(!wait_n) begin
 			ctr <= 0;
-
+			debug_uart_tx(109);
+		end else begin
+			debug_uart_tx_stop();
+		end
+			
 		if(!reset_n) begin
 			/* Trigger reset cycle */
 			cpu_state <= ST_COLDSTART;

@@ -33,6 +33,33 @@ task debug(bit[15:0] value);
 	dbg_regs[3] <= value[15:12];
 endtask
 
+task debug_uart_tx(bit[7:0] data);
+	dbg_uart_din <= data;
+	dbg_uart_wr_en <= 1;
+endtask
+
+task debug_uart_tx_stop;
+	dbg_uart_wr_en <= 0;
+endtask
+
+function [7:0] debug_uart_rx;
+	/* TODO */
+endfunction
+
+task debug_uart_rx_stop;
+	dbg_uart_rdy_clr <= 0;
+endtask
+
+task debug_uart_stop;
+	debug_uart_tx_stop();
+	debug_uart_rx_stop();
+endtask
+
 task debugInit;
+	/* Initialize 7 segment display */
 	debug('hFFFF);
+
+	/* Initialize UART wires */
+	dbg_uart_din <= 0;
+	debug_uart_stop();
 endtask
