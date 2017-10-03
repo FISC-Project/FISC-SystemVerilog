@@ -17,16 +17,16 @@ module FISC_Core(
 	output reg wr_b,    /* 0: CPU writes to memory.            1: CPU is currently executing an instruction (channel b) */
 	output reg rd_b,    /* 0: CPU reads from memory.           1: CPU is currently executing an instruction (channel b) */
 
-	input [`FISC_INTEGER_SZ-1:0] din_bus_a,            /* Data Input Bus  (channel a) */
-	output reg [`FISC_INTEGER_SZ-1:0] dout_bus_a,      /* Data Output Bus (channel a) */
+	input      [`FISC_INTEGER_SZ-1:0]      din_bus_a,  /* Data Input Bus  (channel a) */
+	output reg [`FISC_INTEGER_SZ-1:0]      dout_bus_a, /* Data Output Bus (channel a) */
 	output reg [`FISC_ADDRESS_BOOT_SZ-1:0] addr_bus_a, /* Address Bus     (channel a) */
 	
-	input [`FISC_INTEGER_SZ-1:0] din_bus_b,            /* Data Input Bus  (channel b) */
-	output reg [`FISC_INTEGER_SZ-1:0] dout_bus_b,      /* Data Output Bus (channel b) */
+	input      [`FISC_INTEGER_SZ-1:0]      din_bus_b,  /* Data Input Bus  (channel b) */
+	output reg [`FISC_INTEGER_SZ-1:0]      dout_bus_b, /* Data Output Bus (channel b) */
 	output reg [`FISC_ADDRESS_BOOT_SZ-1:0] addr_bus_b, /* Address Bus     (channel b) */
 
 	/* Debug wires */
-	output dbg_init,
+	output       dbg_init,
 	output [3:0] dbg1,
 	output [3:0] dbg2,
 	output [3:0] dbg3,
@@ -73,16 +73,38 @@ module FISC_Core(
 
 	reg [32:0] ctr = 0;
 
-	/* Microcode instantiation */
-	/* TODO */
+	/* Microcode instantiation and wires */
+	wire microcode_clk_div = ctr == 7500000 ? 1'b1 : 1'b0;
+	wire microcode_sos = cpu_state == ST_DECODE ? 1'b1 : 1'b0;
+	wire microcode_eos = ~microcode_ctrl[0]; /* Microcode's End of Segment */
+	wire [`R_FMT_OPCODE_SZ-1:0] microcode_opcode = instruction[`FISC_INSTRUCTION_SZ-1:`FISC_INSTRUCTION_SZ-`R_FMT_OPCODE_SZ];
+	wire [`CTRL_WIDTH-1:0] microcode_ctrl;
+	
+	wire microcode_debug_en;
+	wire [3:0] microcode_dbg1;
+	wire [3:0] microcode_dbg2;
+	wire [3:0] microcode_dbg3;
+	wire [3:0] microcode_dbg4;
+	
+	Microcode microcode(
+		.clk(microcode_clk_div),
+		.sos(microcode_sos),
+		.microcode_opcode(microcode_opcode),
+		.microcode_ctrl(microcode_ctrl),
+		.debug_en(microcode_debug_en),
+		.dbg1(microcode_dbg1),
+		.dbg2(microcode_dbg2),
+		.dbg3(microcode_dbg3),
+		.dbg4(microcode_dbg4)
+	);
 
 	/* Registers instantiation and wires */
-	reg [5:0] rd_reg;
-	reg [5:0] wr_reg;
-	reg wr_fromreg;
-	reg wr_fromimm;
-	reg [`FISC_INTEGER_SZ-1:0] din_reg;
-	reg [`FISC_INTEGER_SZ-1:0] dout_reg;
+	reg  [5:0] rd_reg;
+	reg  [5:0] wr_reg;
+	reg  wr_fromreg;
+	reg  wr_fromimm;
+	reg  [`FISC_INTEGER_SZ-1:0] din_reg;
+	wire [`FISC_INTEGER_SZ-1:0] dout_reg;
 
 	Registers registers(
 		.clk(clk),
@@ -113,8 +135,26 @@ module FISC_Core(
 		return dout_reg;
 	endfunction
 
-	/* ALU instantiation */
-	/* TODO */
+	/* ALU instantiation and wires */
+	wire [`FISC_INTEGER_SZ-1:0] alu_opA;
+	wire [`FISC_INTEGER_SZ-1:0] alu_opB;
+	wire [`ALU_F_SZ-1:0]        alu_f;
+	wire [`FISC_INTEGER_SZ-1:0] alu_y;
+	wire alu_flag_negative;
+	wire alu_flag_zero;
+	wire alu_flag_overflow;
+	wire alu_flag_carry;
+
+	ALU alu(
+		.opA(alu_opA),
+		.opB(alu_opB),
+		.f(alu_f),
+		.y(alu_y),
+		.flag_negative(alu_flag_negative),
+		.flag_zero(alu_flag_zero),
+		.flag_overflow(alu_flag_overflow),
+		.flag_carry(alu_flag_carry)
+	);
 
 	/* Main memory controls */
 	task write_memory(logic channel, input [`FISC_ADDRESS_BOOT_SZ-1:0] address, input [`FISC_INTEGER_SZ-1:0] din);
@@ -162,7 +202,9 @@ module FISC_Core(
 		ctr <= 0;
 	endtask
 	
+	/******************/
 	/* Main CPU tasks */
+	/******************/
 	reg [`FISC_INTEGER_SZ-1:0] memory_block = 0;
 	logic fetch_word_tophalf = 0;
 	
@@ -206,19 +248,28 @@ module FISC_Core(
 			instruction = memory_block[`FISC_INTEGER_SZ-1:`FISC_INSTRUCTION_SZ];		
 			fetch_word_tophalf <= 0;
 		end
-
+		
+		debug(instruction);
+		
 		/* Decode Instruction */
 		cpu_state <= ST_DECODE;
 	endtask
 	
 	task decode_instruction;
-		debug(instruction);
-
-		/* TODO: Execute instruction */
+		if(microcode_debug_en) begin
+			debugDigit(0, microcode_dbg1);
+			debugDigit(1, microcode_dbg2);
+			debugDigit(2, microcode_dbg3);
+			debugDigit(3, microcode_dbg4);
+		end
 		
-		/* Request next instruction to be fetched */
-		cpu_state <= fetch_word_tophalf ? ST_FETCH2_INSTRUCTION : ST_FETCH1_MEMBLOCK;
-		write_register(32, read_register(32) + 4);
+		if(microcode_eos == 1) begin
+			/* Request next instruction to be fetched */
+			// TODO: UNCOMMENT THE TWO LINES BELOW
+			//cpu_state <= fetch_word_tophalf ? ST_FETCH2_INSTRUCTION : ST_FETCH1_MEMBLOCK;
+			//write_register(32, read_register(32) + 4);
+		end
+		/* Else the Microcode unit is still driving the control wires */
 	endtask
 	
 	always@(posedge clk) begin

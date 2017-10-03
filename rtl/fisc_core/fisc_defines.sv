@@ -5,7 +5,7 @@
 /* File: defines.sv *******************************************************/
 /**************************************************************************/
 
-/* FISC Instruction Set Defines ***/
+/* FISC Instruction Set Defines */
 `define FISC_INSTRUCTION_SZ    32
 `define FISC_INTEGER_SZ        64
 `define FISC_ADDRESS_BOOT_SZ   11
@@ -43,12 +43,15 @@
 
 /* Microcode Unit Defines */
 `define CTRL_WIDTH             32
-`define FUNC_WIDTH             32
+`define FUNC_WIDTH             31
 `define CTRL_DEPTH             256
 `define SEGMENT_MAXCOUNT       256
-`define CTRL_DEPTH_ENC         ($clog2(`CTRL_DEPTH) - 1)
-`define SEGMENT_MAXCOUNT_ENC   ($clog2(`SEGMENT_MAXCOUNT) - 1)
+`define CTRL_DEPTH_ENC         ($clog2(`CTRL_DEPTH))
+`define SEGMENT_MAXCOUNT_ENC   ($clog2(`SEGMENT_MAXCOUNT))
 `define CALLSTACK_SIZE         256
+
+/* ALU Defines */
+`define ALU_F_SZ               4
 
 `define ALIGN_INSTR(val) ((val) << 2)	
 

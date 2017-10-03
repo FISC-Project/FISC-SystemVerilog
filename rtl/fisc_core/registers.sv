@@ -1,12 +1,12 @@
 `include "fisc_defines.sv"
 
 module Registers(
-	input clk,
+	input       clk,
 	input [5:0] rd_reg,
 	input [5:0] wr_reg,
-	input wr_fromreg,           /* 1: regfile[wr_reg] = regfile[rd_reg] | 0: dout_reg = regfile[rd_reg] */
-	input wr_fromimm,           /* 1: regfile[wr_reg = din_reg          | 0: dout_reg = regfile[rd_reg] */
-	input [`FISC_INTEGER_SZ-1:0] din_reg,
+	input       wr_fromreg, /* 1: regfile[wr_reg] = regfile[rd_reg] | 0: dout_reg = regfile[rd_reg] */
+	input       wr_fromimm, /* 1: regfile[wr_reg = din_reg          | 0: dout_reg = regfile[rd_reg] */
+	input  [`FISC_INTEGER_SZ-1:0] din_reg,
 	output [`FISC_INTEGER_SZ-1:0] dout_reg
 );
 	
