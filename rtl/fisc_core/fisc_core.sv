@@ -87,6 +87,7 @@ module FISC_Core(
 	wire [3:0] microcode_dbg4;
 	
 	Microcode microcode(
+		.rst_n(reset_n),
 		.clk(microcode_clk_div),
 		.sos(microcode_sos),
 		.microcode_opcode(microcode_opcode),
@@ -219,8 +220,9 @@ module FISC_Core(
 		write_register(32, 0);
 		
 		/* All done */
-		initialized = 1;
-		initializing = 0;
+		initialized <= 1;
+		initializing <= 0;
+		fetch_word_tophalf <= 0;
 		cpu_state <= ST_FETCH1_MEMBLOCK;
 	endtask
 	
@@ -249,25 +251,18 @@ module FISC_Core(
 			fetch_word_tophalf <= 0;
 		end
 		
-		debug(instruction);
-		
 		/* Decode Instruction */
 		cpu_state <= ST_DECODE;
 	endtask
 	
 	task decode_instruction;
-		if(microcode_debug_en) begin
-			debugDigit(0, microcode_dbg1);
-			debugDigit(1, microcode_dbg2);
-			debugDigit(2, microcode_dbg3);
-			debugDigit(3, microcode_dbg4);
-		end
-		
+		if(microcode_debug_en)
+			debug({microcode_dbg4, microcode_dbg3, microcode_dbg2, microcode_dbg1});
+			
 		if(microcode_eos == 1) begin
 			/* Request next instruction to be fetched */
-			// TODO: UNCOMMENT THE TWO LINES BELOW
-			//cpu_state <= fetch_word_tophalf ? ST_FETCH2_INSTRUCTION : ST_FETCH1_MEMBLOCK;
-			//write_register(32, read_register(32) + 4);
+			cpu_state <= fetch_word_tophalf ? ST_FETCH2_INSTRUCTION : ST_FETCH1_MEMBLOCK;
+			write_register(32, read_register(32) + 4);
 		end
 		/* Else the Microcode unit is still driving the control wires */
 	endtask
@@ -288,7 +283,6 @@ module FISC_Core(
 			cpu_state <= ST_COLDSTART;
 			initializing <= 1;
 			initialized <= 0;
-
 		end else begin
 			/* Algorithm:
 			 * 1- Fetch

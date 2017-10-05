@@ -5,8 +5,9 @@
 /*   OP CAT   |  SPECIFIC INSTR */
 
 module Microcode(
-	input clk, /* Clock signal     */
-	input sos, /* Start Of Segment */
+	input clk,   /* Clock signal     */
+	input rst_n, /* Reset signal     */
+	input sos,   /* Start Of Segment */
 	input [`R_FMT_OPCODE_SZ-1:0] microcode_opcode, /* Opcode of the Microcode/segment  */
 	output [`CTRL_WIDTH:0] microcode_ctrl,         /* Microcode's output control wires */
 	
@@ -32,10 +33,10 @@ module Microcode(
 	
 	task debug(bit[15:0] value);
 		debug_en_reg <= 1;
-		dbg1_reg <= value[3:0];
-		dbg2_reg <= value[7:4];
-		dbg3_reg <= value[11:8];
-		dbg4_reg <= value[15:12];
+		dbg1_reg = value[3:0];
+		dbg2_reg = value[7:4];
+		dbg3_reg = value[11:8];
+		dbg4_reg = value[15:12];
 	endtask
 
 	reg [`FUNC_WIDTH + `CTRL_WIDTH:0] microcode_ctrl_reg = 1;
@@ -58,26 +59,12 @@ module Microcode(
 	
 	enum logic[2:0] {
 		ST_WAITING,
+		ST_DECODING_WAIT1,
+		ST_DECODING_WAIT2,
 		ST_DECODING1,
 		ST_DECODING2,
-		ST_DECODING3,
 		ST_DONE
 	} microcode_state = ST_WAITING;
-	
-	/* Microcode's Code ROM instantiation and wires */
-	reg [7:0] code_rom_address;
-	wire [`FUNC_WIDTH + `CTRL_WIDTH:0] code_rom_q;
-	
-	onchip_rom_microcode onchip_rom_microcode_inst(
-		.address(code_rom_address),
-		.clock(clk),
-		.q(code_rom_q)
-	);
-	
-	function [`FUNC_WIDTH + `CTRL_WIDTH:0] code_rom_read(input [`CTRL_DEPTH_ENC-1:0] address);
-		code_rom_address = address;
-		return code_rom_q;
-	endfunction
 	
 	/* Microcode's Segment ROM instantiation and wires */
 	wire [`SEGMENT_MAXCOUNT_ENC-1:0] seg_rom_address = microcode_opcode[`SEGMENT_MAXCOUNT_ENC-1:0];
@@ -89,26 +76,36 @@ module Microcode(
 		.q(seg_rom_q)
 	);
 	
+	/* Microcode's Code ROM instantiation and wires */
+	wire [`CTRL_DEPTH_ENC-1:0] code_rom_address = seg_rom_q;
+	wire [`FUNC_WIDTH + `CTRL_WIDTH:0] code_rom_q;
+	
+	onchip_rom_microcode onchip_rom_microcode_inst(
+		.address(code_rom_address),
+		.clock(clk),
+		.q(code_rom_q)
+	);
+	
 	/************************/
 	/* Main Microcode tasks */
 	/************************/
 	task microcode_decode;
 		case(microcode_state)
+		ST_DECODING1:
+			begin
+				microcode_ctrl_reg = code_rom_q;
+				microcode_state = microcode_eos ? ST_DONE : ST_DECODING2;
+				code_ip <= seg_rom_q + 1'b1;
+				debug(code_rom_q);
+			end
 		ST_DECODING2:
 			begin
-				microcode_ctrl_reg = code_rom_read(seg_rom_q);
-				microcode_state = microcode_eos ? ST_DONE : ST_DECODING3;
-				code_ip <= seg_rom_q + 1'b1;
-			end
-		ST_DECODING3:
-			begin
-				microcode_ctrl_reg = code_rom_read(code_ip);
+				microcode_ctrl_reg = code_rom_q;
 				microcode_state = microcode_eos ? ST_DONE : microcode_state;
 				code_ip <= code_ip + 1'b1;
+				debug(code_rom_q);
 			end
 		endcase
-		
-		debug(seg_rom_q);	
 	endtask
 	
 	task microcode_finish;
@@ -125,19 +122,28 @@ module Microcode(
 	always@(posedge clk) begin
 		debug_en_reg <= 0;
 		
-		if(sos && microcode_state == ST_WAITING)
-			microcode_state = ST_DECODING1;
-			
-		case(microcode_state)
-		ST_WAITING:
-			microcode_idle(); /* Stay idle */
-		ST_DECODING1: 
-			microcode_state = ST_DECODING2; /* Decode on the next clock cycle */
-		ST_DECODING2, ST_DECODING3: 
-			microcode_decode(); /* Decode instruction */
-		ST_DONE:
-			microcode_finish(); /* Acknowledge microcode's decoding completion to the CPU datapath */
-		endcase
+		if(!rst_n)
+			begin
+				microcode_state <= ST_WAITING;
+			end
+		else
+			begin
+				if(sos && microcode_state == ST_WAITING)
+					microcode_state = ST_DECODING_WAIT1;
+					
+				case(microcode_state)
+				ST_WAITING:
+					microcode_idle(); /* Stay idle */
+				ST_DECODING_WAIT1: 
+					microcode_state = ST_DECODING_WAIT2; /* Wait for microcode segment data to propagate out of the ROM */
+				ST_DECODING_WAIT2:
+					microcode_state = ST_DECODING1; /* Wait for microcode control data to propagate out of the ROM */
+				ST_DECODING1, ST_DECODING2:
+					microcode_decode(); /* Decode instruction */
+				ST_DONE:
+					microcode_finish(); /* Acknowledge microcode's decoding completion to the CPU datapath */
+				endcase
+			end
 	end
 
 endmodule
