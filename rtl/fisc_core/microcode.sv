@@ -33,10 +33,10 @@ module Microcode(
 	
 	task debug(bit[15:0] value);
 		debug_en_reg <= 1;
-		dbg1_reg = value[3:0];
-		dbg2_reg = value[7:4];
-		dbg3_reg = value[11:8];
-		dbg4_reg = value[15:12];
+		dbg1_reg <= value[3:0];
+		dbg2_reg <= value[7:4];
+		dbg3_reg <= value[11:8];
+		dbg4_reg <= value[15:12];
 	endtask
 
 	reg [`FUNC_WIDTH + `CTRL_WIDTH:0] microcode_ctrl_reg = 1;
@@ -59,8 +59,7 @@ module Microcode(
 	
 	enum logic[2:0] {
 		ST_WAITING,
-		ST_DECODING_WAIT1,
-		ST_DECODING_WAIT2,
+		ST_DECODING_ROM_WAIT,
 		ST_DECODING1,
 		ST_DECODING2,
 		ST_DONE
@@ -96,16 +95,16 @@ module Microcode(
 				microcode_ctrl_reg = code_rom_q;
 				microcode_state = microcode_eos ? ST_DONE : ST_DECODING2;
 				code_ip <= seg_rom_q + 1'b1;
-				debug(code_rom_q);
 			end
 		ST_DECODING2:
 			begin
 				microcode_ctrl_reg = code_rom_q;
 				microcode_state = microcode_eos ? ST_DONE : microcode_state;
 				code_ip <= code_ip + 1'b1;
-				debug(code_rom_q);
 			end
 		endcase
+		
+		debug(microcode_ctrl_reg);
 	endtask
 	
 	task microcode_finish;
@@ -128,16 +127,15 @@ module Microcode(
 			end
 		else
 			begin
-				if(sos && microcode_state == ST_WAITING)
-					microcode_state = ST_DECODING_WAIT1;
-					
 				case(microcode_state)
 				ST_WAITING:
-					microcode_idle(); /* Stay idle */
-				ST_DECODING_WAIT1: 
-					microcode_state = ST_DECODING_WAIT2; /* Wait for microcode segment data to propagate out of the ROM */
-				ST_DECODING_WAIT2:
-					microcode_state = ST_DECODING1; /* Wait for microcode control data to propagate out of the ROM */
+					begin
+						microcode_idle(); /* Stay idle */
+						if(sos)
+							microcode_state = ST_DECODING_ROM_WAIT;
+					end
+				ST_DECODING_ROM_WAIT:
+					microcode_state = ST_DECODING1; /* Wait for microcode segment and control data to propagate out of the ROM */
 				ST_DECODING1, ST_DECODING2:
 					microcode_decode(); /* Decode instruction */
 				ST_DONE:
