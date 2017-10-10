@@ -14,16 +14,16 @@ module FISC_Core(
 	output reg ioack_n, /* 0: CPU acknowledges IO request.     1: CPU is either serving an IRQ or is simply executing instructions in normal mode */
 	output reg wr_a,    /* 0: CPU writes to memory.            1: CPU is currently executing an instruction (channel a) */
 	output reg rd_a,    /* 0: CPU reads from memory.           1: CPU is currently executing an instruction (channel a) */
-	output reg wr_b,    /* 0: CPU writes to memory.            1: CPU is currently executing an instruction (channel b) */
-	output reg rd_b,    /* 0: CPU reads from memory.           1: CPU is currently executing an instruction (channel b) */
+	output     wr_b,    /* 0: CPU writes to memory.            1: CPU is currently executing an instruction (channel b) */
+	output     rd_b,    /* 0: CPU reads from memory.           1: CPU is currently executing an instruction (channel b) */
 
 	input      [`FISC_INTEGER_SZ-1:0]      din_bus_a,  /* Data Input Bus  (channel a) */
 	output reg [`FISC_INTEGER_SZ-1:0]      dout_bus_a, /* Data Output Bus (channel a) */
 	output reg [`FISC_ADDRESS_BOOT_SZ-1:0] addr_bus_a, /* Address Bus     (channel a) */
 	
 	input      [`FISC_INTEGER_SZ-1:0]      din_bus_b,  /* Data Input Bus  (channel b) */
-	output reg [`FISC_INTEGER_SZ-1:0]      dout_bus_b, /* Data Output Bus (channel b) */
-	output reg [`FISC_ADDRESS_BOOT_SZ-1:0] addr_bus_b, /* Address Bus     (channel b) */
+	output     [`FISC_INTEGER_SZ-1:0]      dout_bus_b, /* Data Output Bus (channel b) */
+	output     [`FISC_ADDRESS_BOOT_SZ-1:0] addr_bus_b, /* Address Bus     (channel b) */
 
 	/* Debug wires */
 	output       dbg_init,
@@ -98,48 +98,58 @@ module FISC_Core(
 		.dbg3(microcode_dbg3),
 		.dbg4(microcode_dbg4)
 	);
-
+	
+	/* Microcode control assignments */
+	wire       mcu_first_op_src   = microcode_ctrl[23];
+	wire       mcu_reg_wr         = microcode_ctrl[22];
+	wire [3:0] mcu_reg_special_wr = microcode_ctrl[21:18];
+	wire [3:0] mcu_reg_special_rd = microcode_ctrl[17:14];
+	wire [1:0] mcu_reg_din_src    = microcode_ctrl[13:12];
+	wire [1:0] mcu_alu_src        = microcode_ctrl[11:10];
+	wire [3:0] mcu_alu_f          = microcode_ctrl[9:6];
+	wire       mcu_mem_wr_b       = microcode_ctrl[5];
+	wire       mcu_mem_rd_b       = microcode_ctrl[4];
+	wire       mcu_branch         = microcode_ctrl[3];
+	wire       mcu_pc_rel         = microcode_ctrl[2];
+	wire       mcu_set_flags      = microcode_ctrl[1];
+	
 	/* Registers instantiation and wires */
-	reg  [5:0] rd_reg;
+	reg  [5:0] rd_reg1;
 	reg  [5:0] wr_reg;
-	reg  wr_fromreg;
-	reg  wr_fromimm;
-	reg  [`FISC_INTEGER_SZ-1:0] din_reg;
-	wire [`FISC_INTEGER_SZ-1:0] dout_reg;
-
+	reg  reg_wr;
+	reg  [`FISC_INTEGER_SZ-1:0] din;
+	wire [`FISC_INTEGER_SZ-1:0] dout1;
+	wire [`FISC_INTEGER_SZ-1:0] dout2;
+	
 	Registers registers(
 		.clk(clk),
-		.rd_reg(rd_reg),
-		.wr_reg(wr_reg),
-		.wr_fromreg(wr_fromreg),
-		.wr_fromimm(wr_fromimm),
-		.din_reg(din_reg),
-		.dout_reg(dout_reg)
+		.rd_reg1(microcode_sos ? rd_reg1 : (mcu_reg_special_rd > 0 ? mcu_reg_special_rd + 31 : (mcu_first_op_src ? instruction[20:16] : instruction[9:5]))),
+		.rd_reg2(microcode_sos ? rd_reg2 : (mcu_mem_wr_b ? instruction[4:0] : (mcu_first_op_src ? instruction[9:5] : instruction[20:16]))),
+		.wr_reg(microcode_sos ? wr_reg : (mcu_reg_special_wr > 0 ? mcu_reg_special_wr + 31 : instruction[4:0])),
+		.wr(microcode_sos ? reg_wr : mcu_reg_wr),
+		.din(microcode_sos ? din : (mcu_reg_din_src == 1 ? alu_y : (mcu_reg_din_src == 2 ? din_bus_b : 'hX))),
+		.dout1(dout1),
+		.dout2(dout2),
+		.set_flags(mcu_set_flags),
+		.flag_negative(alu_flag_negative),
+		.flag_zero(alu_flag_zero),
+		.flag_overflow(alu_flag_overflow),
+		.flag_carry(alu_flag_carry)
 	);
 	
-	task write_register(input [5:0] regno, input [`FISC_INTEGER_SZ-1:0] din);
+	task write_register(input [5:0] regno, input [`FISC_INTEGER_SZ-1:0] din_register);
 		/* Write immediate value into register */
 		wr_reg <= regno;
-		din_reg <= din;
-		wr_fromimm <= 1;
-	endtask
-	
-	task copy_register(input [5:0] regno_src, input [5:0] regno_dst);
-		/* Write a register's value into another register */
-		wr_reg <= regno_dst;
-		rd_reg <= regno_src;
-		wr_fromreg <= 1;
+		din <= din_register;
+		reg_wr <= 1;
 	endtask
 	
 	function [`FISC_INTEGER_SZ-1:0] read_register(input [5:0] regno);
-		rd_reg = regno;
-		return dout_reg;
+		rd_reg1 = regno;
+		return dout1;
 	endfunction
 
 	/* ALU instantiation and wires */
-	wire [`FISC_INTEGER_SZ-1:0] alu_opA;
-	wire [`FISC_INTEGER_SZ-1:0] alu_opB;
-	wire [`ALU_F_SZ-1:0]        alu_f;
 	wire [`FISC_INTEGER_SZ-1:0] alu_y;
 	wire alu_flag_negative;
 	wire alu_flag_zero;
@@ -147,9 +157,9 @@ module FISC_Core(
 	wire alu_flag_carry;
 
 	ALU alu(
-		.opA(alu_opA),
-		.opB(alu_opB),
-		.f(alu_f),
+		.opA(dout1),
+		.opB(mcu_alu_src == 0 ? instruction[21:10] : (mcu_alu_src == 1 ? dout2 : (mcu_alu_src == 2 ? din_bus_a : 'hX))),
+		.f(mcu_alu_f),
 		.y(alu_y),
 		.flag_negative(alu_flag_negative),
 		.flag_zero(alu_flag_zero),
@@ -158,43 +168,28 @@ module FISC_Core(
 	);
 
 	/* Main memory controls */
-	task write_memory(logic channel, input [`FISC_ADDRESS_BOOT_SZ-1:0] address, input [`FISC_INTEGER_SZ-1:0] din);
-		if(!channel) begin
-			addr_bus_a <= address;
-			dout_bus_a <= din;
-			wr_a <= 1;
-		end else begin
-			addr_bus_b <= address;
-			dout_bus_b <= din;
-			wr_b <= 1;
-		end
-	endtask
+	assign dout_bus_b = dout2;
+	assign addr_bus_b = alu_y[10:0];
+	assign wr_b = mcu_mem_wr_b;
+	assign rd_b = mcu_mem_rd_b;
 	
-	task enable_read_memory(logic channel, input [`FISC_ADDRESS_BOOT_SZ-1:0] address);
-		if(!channel) begin
+	task enable_read_memory(input [`FISC_ADDRESS_BOOT_SZ-1:0] address);
 			addr_bus_a <= address;
 			rd_a <= 1;
-		end else begin
-			addr_bus_b <= address;
-			rd_b <= 1;
-		end
 	endtask
 
-	function [`FISC_INTEGER_SZ-1:0] read_memory(logic channel);
-		return !channel ? din_bus_a : din_bus_b;
+	function [`FISC_INTEGER_SZ-1:0] read_memory;
+		return din_bus_a;
 	endfunction
 
 	task reset_control_wires;
 		/* Memory controls */
 		wr_a = 0;
-		wr_b = 0;
 		rd_a = 0;
-		rd_b = 0;
 		
 		/* Register controls */
 		wr_reg = 0;
-		wr_fromimm = 0;
-		wr_fromreg = 0;
+		reg_wr = 0;
 		
 		/* Debug UART */
 		debug_uart_stop();		
@@ -230,7 +225,7 @@ module FISC_Core(
 		logic [`FISC_INTEGER_SZ-1:0] current_pc = read_register(32);
 		
 		/* Fetch memory block by first enabling read and setting the address */
-		enable_read_memory(0, !current_pc ? current_pc : current_pc / 8);
+		enable_read_memory(!current_pc ? current_pc : current_pc / 8);
 		
 		cpu_state <= ST_FETCH2_INSTRUCTION;
 	endtask
@@ -240,7 +235,7 @@ module FISC_Core(
 		   instruction from the local memory block */
 	
 		/* Now we can latch the memory block */
-		memory_block = read_memory(0);
+		memory_block = read_memory();
 		
 		/* Grab instruction from fetched memory block */
 		if(fetch_word_tophalf == 0) begin
